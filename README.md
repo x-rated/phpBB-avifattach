@@ -10,6 +10,7 @@ Converts uploaded image attachments and avatars to AVIF with PHP's GD, or with I
 ## What it does
 - JPEG, PNG, GIF, WebP and BMP uploads are re-encoded as AVIF. Metadata (EXIF, GPS, ICC, XMP) is dropped; the EXIF orientation is applied first.
 - Animated GIF/WebP/PNG are left untouched, as is any image that is not smaller as AVIF or too large for the PHP memory limit.
+- **PNG stays PNG when that is smaller.** A PNG is also packed losslessly (palette when it has at most 256 colours, an alpha channel that is fully opaque dropped, best scanline filter and deflate settings, metadata removed; colour profile, sRGB, gamma and chromaticities stay). If that result is not larger than the AVIF, or AVIF would not be smaller than the original, the file stays a PNG with the same name and type and only its size changes. The result is compared pixel by pixel with the original, written, read back and compared again; on any difference the original stays. 16-bit, animated and very large PNGs (over 4 MB or 6 megapixels) are not re-encoded, and it needs no extra PHP extension (GD is used when present, otherwise only the deflate repacking runs).
 - Attachment: the file name, extension and mime type are changed to `.avif` / `image/avif`; thumbnails are created as AVIF too.
 - Avatar: the file keeps its old name and extension (phpBB only serves avatars named png/gif/jpg/jpeg); the content is AVIF and `download/file.php` sends the real type.
 - The upload progress in the posting form shows the real (converted) size.

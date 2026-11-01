@@ -128,6 +128,24 @@ class listener implements EventSubscriberInterface
 		clearstatcache(true, $tmp);
 		$size = $ok ? (int) @filesize($tmp) : 0;
 
+		// a PNG that packs smaller than the AVIF (or when AVIF fails / is not smaller than the original) stays a PNG,
+		// compressed losslessly: same name and type, identical pixels
+		if ($ext === 'png')
+		{
+			$packed = \slamb\avifattach\core\png_optimizer::supported() ? \slamb\avifattach\core\png_optimizer::optimize($raw) : false;
+			if ($packed !== false && ($size <= 0 || strlen($packed) <= $size))
+			{
+				$n = $this->write_png($path, $raw, $packed);
+				if ($n > 0)
+				{
+					@unlink($tmp);
+					$data['filesize'] = $n;
+					$event['filedata'] = $data;
+					return;
+				}
+			}
+		}
+
 		// failed, or not smaller than the original: keep the original
 		if ($size <= 0 || $size >= strlen($raw))
 		{
@@ -148,6 +166,41 @@ class listener implements EventSubscriberInterface
 		$data['real_filename'] = (preg_match('/\.[A-Za-z0-9]+$/', $name) ? preg_replace('/\.[A-Za-z0-9]+$/', '.avif', $name) : $name . '.avif');
 
 		$event['filedata'] = $data;
+	}
+
+	/**
+	 * Replace a PNG with its losslessly packed version (same file name and type; colour profile and gamma stay,
+	 * other metadata goes). The new file is read back and compared pixel by pixel before and after the swap;
+	 * the original is put back if anything differs.
+	 *
+	 * @return int new size in bytes, 0 when the file was left as it was
+	 */
+	protected function write_png($path, $raw, $opt)
+	{
+		$tmp = $path . '.png.tmp';
+		if (@file_put_contents($tmp, $opt) !== strlen($opt) || @file_get_contents($tmp) !== $opt
+			|| !\slamb\avifattach\core\png_optimizer::same_pixels($raw, $opt))
+		{
+			@unlink($tmp);
+			return 0;
+		}
+		if (function_exists('chmod') && function_exists('fileperms'))
+		{
+			@chmod($tmp, @fileperms($path) & 0777);
+		}
+		if (!@rename($tmp, $path))
+		{
+			@unlink($tmp);
+			return 0;
+		}
+
+		clearstatcache(true, $path);
+		if (@file_get_contents($path) !== $opt)
+		{
+			@file_put_contents($path, $raw); // put the original back
+			return 0;
+		}
+		return strlen($opt);
 	}
 
 	/**
@@ -212,7 +265,22 @@ class listener implements EventSubscriberInterface
 		clearstatcache(true, $tmp);
 		$size = $ok ? (int) @filesize($tmp) : 0;
 
-		if ($size <= 0 || $size >= strlen($raw) || !@rename($tmp, $path))
+		if ($ext === 'png')
+		{
+			$packed = \slamb\avifattach\core\png_optimizer::supported() ? \slamb\avifattach\core\png_optimizer::optimize($raw) : false;
+			if ($packed !== false && ($size <= 0 || strlen($packed) <= $size) && $this->write_png($path, $raw, $packed) > 0)
+			{
+				@unlink($tmp);
+				return; // stays a PNG with the same size in pixels
+			}
+		}
+
+		if ($size <= 0 || $size >= strlen($raw))
+		{
+			@unlink($tmp);
+			return;
+		}
+		if (!@rename($tmp, $path))
 		{
 			@unlink($tmp);
 			return;
